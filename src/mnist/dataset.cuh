@@ -37,6 +37,12 @@ public:
     // 打印图像数据(用于调试)
     void print_im();
 
+    // 分布式数据加载
+    void distributed_forward(int batch_size, bool is_train, int rank);
+
+    int get_train_index() const { return train_data_index; }
+    int get_train_size() const { return train_data.size(); }
+
 private:
     unsigned int reverse_int(unsigned int i);  // 大端序转换函数
     

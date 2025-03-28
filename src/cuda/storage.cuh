@@ -2,9 +2,13 @@
 
 #include <cuda_runtime.h>
 #include <thrust/device_vector.h>
+#include <distributed.cuh>
 
 #include <iterator>
 #include <vector>
+
+#include <nccl.h>
+
 
 class Storage {
  public:
@@ -27,6 +31,10 @@ class Storage {
   const std::vector<int> &get_shape() const { return this->shape; };
   thrust::device_vector<float> &get_data() { return this->data; };
   const thrust::device_vector<float> &get_data() const { return this->data; };
+
+  // 新增分布式方法
+  void all_reduce();
+  void broadcast(int root);
 
  private:
   void check_size();  // check data/shape size

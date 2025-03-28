@@ -98,3 +98,11 @@ void Storage::check_size() {
   }
   CHECK_EQ(size, this->data.size(), "Storage: size error");
 }
+
+void Storage::all_reduce() {
+    distributed::all_reduce(this);
+}
+
+void Storage::broadcast(int root) {
+    distributed::broadcast(this, root);
+}

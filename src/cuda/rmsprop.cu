@@ -63,3 +63,9 @@ void RMSProp::step() {
                    this->beta);
   }
 }
+
+void RMSProp::distributed_step() {
+    // 在step()之前不执行任何额外操作
+    // 梯度同步现在由DistributedTrainer负责
+    this->step();
+}

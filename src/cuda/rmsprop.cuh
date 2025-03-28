@@ -22,8 +22,10 @@ class RMSProp : public Optimizer {
   }
 
   void regist(std::vector<std::pair<Storage *, Storage *>> params);
-  void step();
+  void step() override;
 
+  void distributed_step() override;
+  
  private:
   std::vector<std::unique_ptr<Storage>> square_grad;
 

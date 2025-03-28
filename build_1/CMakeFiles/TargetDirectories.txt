@@ -1,0 +1,4 @@
+/home/cjy/cuda-neural-network/cuda-neural-network-master/build/CMakeFiles/cu.dir
+/home/cjy/cuda-neural-network/cuda-neural-network-master/build/CMakeFiles/mnist.dir
+/home/cjy/cuda-neural-network/cuda-neural-network-master/build/CMakeFiles/edit_cache.dir
+/home/cjy/cuda-neural-network/cuda-neural-network-master/build/CMakeFiles/rebuild_cache.dir

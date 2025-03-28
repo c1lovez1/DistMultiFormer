@@ -69,36 +69,36 @@ MNIST::MNIST(std::string mnist_data_path, float learning_rate, float l2, float b
 // epochs: 训练轮数
 // batch_size: 每批次样本数量
 void MNIST::train(int epochs, int batch_size) {
-    // 遍历训练轮数
+    // 添加每个epoch的最大批次数限制
+    const int max_batches_per_epoch = 60000 / batch_size + 1; // MNIST训练集约60000张图片
+    
     for (int epoch = 0; epoch < epochs; epoch++) {
-        int idx = 1;  // 批次计数器
-
-        // 当数据集还有下一批训练数据时继续训练
-        while (dataset->has_next(true)) {
-            forward(batch_size, true);   // 前向传播
-            backward();                  // 反向传播计算梯度
-            rmsprop->step();            // 使用RMSProp优化器更新参数
-
-            // 每10个批次打印一次训练状态
+        int idx = 1;
+        std::cout << "开始第 " << epoch << " 轮训练..." << std::endl;
+        
+        // 添加批次数量限制条件
+        while (dataset->has_next(true) && idx <= max_batches_per_epoch) {
+            forward(batch_size, true);
+            backward();
+            rmsprop->step();
+            
             if (idx % 10 == 0) {
-                // 获取当前批次的损失值
                 float loss = this->nll_loss->get_output()->get_data()[0];
-                // 计算当前批次的Top1准确率
-                // 返回值: pair<正确预测数量, 总样本数量>   
                 auto acc = top1_accuracy(this->log_softmax->get_output()->get_data(),
-                                         10, this->dataset->get_label()->get_data());
-
-                // 打印训练信息:当前轮数、批次、损失值和准确率
+                                        10, this->dataset->get_label()->get_data());
                 std::cout << "Epoch: " << epoch << ", Batch: " << idx
                           << ", NLLLoss: " << loss
                           << ", Train Accuracy: " << (float(acc.first) / acc.second)
                           << std::endl;
             }
-            ++idx;  // 批次计数器递增
+            ++idx;
         }
-
-        test(batch_size);     // 每轮结束后在测试集上评估模型
-        dataset->reset();     // 重置数据集状态,准备下一轮训练
+        
+        // 强制重置数据集，确保下一个epoch正常开始
+        std::cout << "第 " << epoch << " 轮训练完成，处理了 " << (idx-1) << " 个批次" << std::endl;
+        dataset->reset();
+        
+        test(batch_size);
     }
 }
 
@@ -137,9 +137,11 @@ void MNIST::test(int batch_size) {
 // MNIST模型的前向传播函数
 // batch_size: 每批次样本数量
 // is_train: 是否为训练模式
-void MNIST::forward(int batch_size, bool is_train) {
-    // 从数据集获取下一批数据
-    dataset->forward(batch_size, is_train);
+// rank: 当前进程编号
+void MNIST::forward(int batch_size, bool is_train, int rank) {
+    // 根据rank加载不同数据分片
+    dataset->distributed_forward(batch_size, is_train, rank);
+    
     // 获取标签数据
     const Storage* labels = dataset->get_label();
 
@@ -170,6 +172,12 @@ void MNIST::forward(int batch_size, bool is_train) {
 
     // 仅在训练模式下计算损失
     if (is_train) nll_loss->forward(labels);  // 负对数似然损失
+}
+
+// 添加缺失的非分布式前向传播实现
+void MNIST::forward(int batch_size, bool is_train) {
+    // 调用分布式版本，但rank设为0（单机版本）
+    forward(batch_size, is_train, 0);
 }
 
 // MNIST模型的反向传播函数
@@ -248,4 +256,52 @@ std::pair<int, int> MNIST::top1_accuracy(
     }
     // 返回正确预测数量和总样本数量的配对
     return {count, size};
+}
+
+void MNIST::distributed_update() {
+    // 使用分布式优化器更新
+    rmsprop->distributed_step();
+}
+
+std::vector<Storage*> MNIST::get_parameters() {
+    std::vector<Storage*> params;
+    
+    // 收集所有层的权重参数
+    auto conv1_params = conv1->parameters();
+    auto conv2_params = conv2->parameters();
+    auto conv3_params = conv3->parameters();
+    auto fc1_params = fc1->parameters();
+    auto fc2_params = fc2->parameters();
+    
+    for (auto& param_pair : conv1_params) params.push_back(param_pair.first);
+    for (auto& param_pair : conv2_params) params.push_back(param_pair.first);
+    for (auto& param_pair : conv3_params) params.push_back(param_pair.first);
+    for (auto& param_pair : fc1_params) params.push_back(param_pair.first);
+    for (auto& param_pair : fc2_params) params.push_back(param_pair.first);
+    
+    return params;
+}
+
+std::vector<Storage*> MNIST::get_gradients() {
+    std::vector<Storage*> grads;
+    
+    // 收集所有层的梯度参数
+    auto conv1_params = conv1->parameters();
+    auto conv2_params = conv2->parameters();
+    auto conv3_params = conv3->parameters();
+    auto fc1_params = fc1->parameters();
+    auto fc2_params = fc2->parameters();
+    
+    for (auto& param_pair : conv1_params) grads.push_back(param_pair.second);
+    for (auto& param_pair : conv2_params) grads.push_back(param_pair.second);
+    for (auto& param_pair : conv3_params) grads.push_back(param_pair.second);
+    for (auto& param_pair : fc1_params) grads.push_back(param_pair.second);
+    for (auto& param_pair : fc2_params) grads.push_back(param_pair.second);
+    
+    return grads;
+}
+
+void MNIST::update_parameters() {
+    // 使用常规步骤更新参数（不同步梯度）
+    rmsprop->step();
 }

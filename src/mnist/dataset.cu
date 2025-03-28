@@ -52,26 +52,13 @@ DataSet::DataSet(std::string mnist_data_path, bool shuffle)
  * 2. 如果启用了shuffle,则对训练数据进行随机打乱
  */
 void DataSet::reset() {
-  // 重置训练数据索引为0
-  this->train_data_index = 0;
-  // 重置测试数据索引为0  
-  this->test_data_index = 0;
-
-  // 如果启用了数据打乱
-  if (shuffle) {
-    // 生成随机种子
-    // 使用当前时间戳对1234取模,保证每次运行时种子相同
-    unsigned int seed =
-        std::chrono::system_clock::now().time_since_epoch().count() % 1234;
-
-    // 使用相同的随机种子打乱训练数据
-    std::shuffle(this->train_data.begin(), this->train_data.end(),
-                 std::default_random_engine(seed));
-    // 使用相同的随机种子打乱训练标签
-    // 保证数据和标签的对应关系不变
-    std::shuffle(this->train_label.begin(), this->train_label.end(),
-                 std::default_random_engine(seed));
-  }
+    train_data_index = 0;
+    test_data_index = 0;
+    
+    std::cout << "数据集已重置：训练索引=" << train_data_index 
+              << ", 测试索引=" << test_data_index << std::endl;
+              
+    // 如果需要打乱数据，在这里实现
 }
 
 /**
@@ -173,13 +160,16 @@ void DataSet::forward(int batch_size, bool is_train) {
 // 返回值:
 //   如果还有未处理的数据返回true,否则返回false
 bool DataSet::has_next(bool is_train) {
-  if (is_train) {
-    // 训练模式:检查训练数据索引是否小于训练数据总量
-    return this->train_data_index < this->train_data.size();
-  } else {
-    // 测试模式:检查测试数据索引是否小于测试数据总量
-    return this->test_data_index < this->test_data.size();
-  }
+    if (is_train) {
+        bool has_next = train_data_index < train_data.size();
+        if (!has_next && train_data_index > 0) {
+            std::cout << "已处理完所有训练数据：索引=" << train_data_index 
+                      << ", 总数=" << train_data.size() << std::endl;
+        }
+        return has_next;
+    } else {
+        return test_data_index < test_data.size();
+    }
 }
 
 // 打印当前批次的图像数据和对应标签
@@ -324,4 +314,66 @@ void DataSet::read_labels(std::string file_name,
       output.push_back(label);  // 将标签添加到输出向量中
     }
   }
+}
+
+void DataSet::distributed_forward(int batch_size, bool is_train, int rank) {
+    // 计算每个进程的数据范围
+    int world_size = DistributedConfig::get_instance().world_size;
+    int samples_per_rank = batch_size / world_size;
+    int start_idx = rank * samples_per_rank;
+    
+    if (is_train) {
+        // 计算当前进程的数据偏移
+        int total_batch_size = batch_size * world_size;
+        int start = (this->train_data_index + rank * batch_size) % this->train_data.size();
+        
+        // 确保不越界
+        if (start + batch_size > this->train_data.size()) {
+            start = 0; // 循环到数据集开头
+        }
+        
+        // 初始化设备内存
+        std::vector<int> output_shape{batch_size, 1, this->height, this->width};
+        std::vector<int> output_label_shape{batch_size, 10};
+        INIT_STORAGE(this->output, output_shape);
+        INIT_STORAGE(this->output_label, output_label_shape);
+        thrust::fill(this->output_label->get_data().begin(),
+                     this->output_label->get_data().end(), 0);
+                     
+        // 准备数据缓冲区
+        int im_stride = 1 * this->height * this->width;
+        int one_hot_stride = 10;
+        train_data_buffer.resize(batch_size * im_stride);
+        
+        // 拷贝数据和生成标签
+        for (int i = 0; i < batch_size; i++) {
+            int idx = (start + i) % this->train_data.size();
+            std::copy(this->train_data[idx].begin(),
+                      this->train_data[idx].end(),
+                      train_data_buffer.begin() + i * im_stride);
+                      
+            this->output_label->get_data()[i * one_hot_stride + this->train_label[idx]] = 1;
+        }
+        
+        // 数据传输到GPU
+        this->output->get_data() = train_data_buffer;
+        
+        // 所有进程共同移动索引
+        int old_index = train_data_index;
+        train_data_index += batch_size;
+        
+        // 添加安全检查，防止索引越界
+        if (train_data_index > train_data.size()) {
+            std::cout << "警告：训练索引越界！旧索引=" << old_index 
+                      << ", 新索引=" << train_data_index 
+                      << ", 数据总量=" << train_data.size() << std::endl;
+        }
+    } else {
+        // 测试数据处理 - 可以简化为只在rank 0上进行
+        if (rank == 0) {
+            forward(batch_size, false);
+        }
+        // 可选：广播测试结果到所有进程
+        test_data_index += batch_size;
+    }
 }

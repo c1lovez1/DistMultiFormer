@@ -42,11 +42,45 @@ public:
     // batch_size: 批次大小
     void test(int batch_size);
 
+    // 分布式前向传播
+    void forward(int batch_size, bool is_train, int rank);
+
+    // 分布式参数更新
+    void distributed_update();
+
+    // 获取所有模型参数
+    std::vector<Storage*> get_parameters();
+
+    // 获取所有梯度
+    std::vector<Storage*> get_gradients();
+    
+    // 更新参数（不自动同步梯度）
+    void update_parameters();
+
+    // 添加以下缺失的方法
+    bool has_next_batch(bool is_train) {
+        return dataset->has_next(is_train);
+    }
+    
+    float get_loss() {
+        return this->nll_loss->get_output()->get_data()[0];
+    }
+    
+    std::pair<int, int> get_accuracy() {
+        return top1_accuracy(this->log_softmax->get_output()->get_data(),
+                            10, this->dataset->get_label()->get_data());
+    }
+    
+    void reset_dataset() {
+        dataset->reset();
+    }
+
+    // 将backward()移到public部分
+    void backward();
+
 private:
     // 前向传播函数
     void forward(int batch_size, bool is_train);  
-    // 反向传播函数
-    void backward();                              
 
     // 计算Top1准确率
     // probs: 预测概率

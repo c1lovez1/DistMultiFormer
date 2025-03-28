@@ -44,3 +44,4 @@ void Sigmoid::backward() {
   INIT_STORAGE(this->grad, input->get_shape());
   operator_d_sigmoid(output_grad, input, this->grad.get(), this->temp);
 }
+
